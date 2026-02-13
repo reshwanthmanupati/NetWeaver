@@ -1,0 +1,31 @@
+# NetWeaver Telemetry Agent Configuration
+# Production-grade configuration for high-throughput network telemetry collection
+
+collectors:
+  netflow:
+    listen: "0.0.0.0:2055"
+    workers: 16  # Number of concurrent NetFlow processors
+    enabled: true
+  
+  sflow:
+    listen: "0.0.0.0:6343"
+    workers: 16  # Number of concurrent sFlow processors
+    enabled: true
+
+database:
+  host: "localhost"
+  port: 5432
+  database: "netweaver"
+  user: "netweaver"
+  password: "netweaver_secure_pass_2026"
+  pool_size: 50  # Connection pool size
+
+performance:
+  buffer_size: 10000  # Number of flow records to buffer before database insert
+  flush_interval: 5   # Seconds between forced buffer flushes
+  udp_buffer_size: 26214400  # 25 MB OS UDP receive buffer
+
+monitoring:
+  enabled: true
+  stats_interval: 30  # Seconds between statistics logging
+  prometheus_port: 9100

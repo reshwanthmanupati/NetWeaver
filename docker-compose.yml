@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # TimescaleDB for time-series network metrics
+  timescaledb:
+    image: timescale/timescaledb:2.13.0-pg16
+    container_name: netweaver-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: netweaver
+      POSTGRES_PASSWORD: netweaver_secure_pass_2026
+      POSTGRES_DB: netweaver
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./deployments/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    command: postgres -c shared_preload_libraries=timescaledb -c max_connections=200
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netweaver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and pub/sub
+  redis:
+    image: redis:7.2-alpine
+    container_name: netweaver-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    container_name: netweaver-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deployments/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:10.3.1
+    container_name: netweaver-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: netweaver2026
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deployments/grafana-dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      - timescaledb
+      - prometheus
+
+volumes:
+  timescaledb-data:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  default:
+    name: netweaver-network
+    driver: bridge
