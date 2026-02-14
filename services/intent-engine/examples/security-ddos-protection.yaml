@@ -1,0 +1,66 @@
+# Example 3: Security Policy - Block Malicious Traffic
+name: security-ddos-protection
+description: Automatically rate-limit and block DDoS traffic to web servers
+priority: 150  # Higher priority than normal policies
+created_by: security-team
+
+policy:
+  type: security
+  constraints:
+    - metric: throughput
+      operator: "<"
+      value: 100000  # Max 100K pps per source
+      unit: pps
+    - metric: packet_loss
+      operator: "<"
+      value: 1.0
+      unit: "%"
+  
+  actions:
+    - type: firewall
+      parameters:
+        action: rate-limit
+        rate: 10000  # pps
+        burst: 20000
+        policer: srr-shaped  # Single-Rate Three-Color
+    - type: firewall
+      parameters:
+        action: block
+        threshold_pps: 50000  # Block if exceeds 50K pps
+        duration: 300  # Block for 5 minutes
+    - type: alert
+      parameters:
+        notify: [security-team@company.com]
+        severity: critical
+        channels: [email, slack]
+  
+  conditions:
+    - type: traffic_type
+      parameters:
+        type: http
+        protocols: [tcp]
+        ports: [80, 443]
+    - type: destination
+      parameters:
+        networks: [172.16.0.0/24]  # Web server subnet
+    - type: anomaly
+      parameters:
+        detection: ml-based
+        threshold: 3-sigma  # 3 standard deviations
+        baseline_window: 3600  # 1 hour baseline
+
+targets:
+  - type: device
+    identifiers:
+      - firewall-edge-01
+      - firewall-edge-02
+      - router-dmz-01
+  - type: interface
+    identifiers:
+      - GigabitEthernet0/0/0  # Internet-facing interface
+
+metadata:
+  owner: security-team
+  environment: production
+  compliance: PCI-DSS
+  incident_playbook: https://wiki.company.com/security/ddos-response

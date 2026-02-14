@@ -1,0 +1,56 @@
+# Example 2: Guaranteed Bandwidth for Backup Traffic
+name: backup-guaranteed-bandwidth
+description: Ensure backup traffic gets minimum 1Gbps bandwidth during off-hours
+priority: 80
+created_by: storage-team
+
+policy:
+  type: bandwidth
+  constraints:
+    - metric: bandwidth
+      operator: ">="
+      value: 1
+      unit: Gbps
+    - metric: availability
+      operator: ">="
+      value: 99.5
+      unit: "%"
+  
+  actions:
+    - type: qos
+      parameters:
+        class: af31  # Assured Forwarding
+        guaranteed_bandwidth: 1000000000  # 1 Gbps in bps
+        max_bandwidth: 5000000000  # 5 Gbps burst
+    - type: route
+      parameters:
+        path_selection: highest-bandwidth
+        ecmp: true  # Equal-Cost Multi-Path
+  
+  conditions:
+    - type: traffic_type
+      parameters:
+        type: backup
+        protocols: [tcp]
+        ports: [3260, 8080, 10000]  # iSCSI, HTTP
+    - type: destination
+      parameters:
+        networks: [10.200.0.0/16]  # Backup storage network
+
+targets:
+  - type: device
+    identifiers:
+      - router-dc-01
+      - router-dc-02
+      - switch-storage-01
+
+schedule:
+  start_time: "20:00"
+  end_time: "06:00"
+  days: [monday, tuesday, wednesday, thursday, friday, saturday, sunday]
+  timezone: UTC
+
+metadata:
+  owner: storage-team
+  environment: production
+  sla: gold

@@ -112,6 +112,13 @@ CREATE INDEX idx_flow_src_dst ON flow_records(source_ip, destination_ip, time DE
 CREATE INDEX idx_flow_protocol ON flow_records(protocol, time DESC);
 CREATE INDEX idx_flow_ports ON flow_records(destination_port, time DESC);
 
+-- Enable compression on the hypertable first
+ALTER TABLE flow_records SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = 'exporter_ip, source_ip, destination_ip',
+  timescaledb.compress_orderby = 'time DESC'
+);
+
 -- Compression policy (compress chunks older than 7 days)
 SELECT add_compression_policy('flow_records', INTERVAL '7 days', if_not_exists => TRUE);
 

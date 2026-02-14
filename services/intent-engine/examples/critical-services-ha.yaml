@@ -1,0 +1,71 @@
+# Example 4: High Availability - Automatic Failover
+name: critical-services-ha
+description: Ensure 99.99% availability for critical business applications
+priority: 200  # Highest priority
+created_by: platform-team
+
+policy:
+  type: availability
+  constraints:
+    - metric: availability
+      operator: ">="
+      value: 99.99
+      unit: "%"
+    - metric: latency
+      operator: "<"
+      value: 100
+      unit: ms
+    - metric: packet_loss
+      operator: "<"
+      value: 0.01
+      unit: "%"
+  
+  actions:
+    - type: route
+      parameters:
+        path_selection: primary
+        backup_path: true
+        failover_time: 5000  # 5 seconds max failover
+        health_check: bidirectional-forwarding-detection  # BFD
+        health_check_interval: 1000  # 1 second
+    - type: redundancy
+      parameters:
+        protocol: vrrp  # Virtual Router Redundancy Protocol
+        priority: 200
+        preempt: true
+        track_interface: true
+    - type: healing
+      parameters:
+        auto_remediate: true
+        rollback_on_failure: true
+        notification: true
+  
+  conditions:
+    - type: traffic_type
+      parameters:
+        type: business-critical
+        applications: [crm, erp, database]
+    - type: destination
+      parameters:
+        networks: [10.100.0.0/16]  # Production application subnet
+        vips: [10.100.1.100, 10.100.1.101]  # Virtual IPs
+
+targets:
+  - type: device
+    identifiers:
+      - router-core-01
+      - router-core-02
+      - router-agg-01
+      - router-agg-02
+  - type: network
+    identifiers:
+      - datacenter-primary
+      - datacenter-dr  # Disaster Recovery site
+
+metadata:
+  owner: platform-team
+  environment: production
+  sla: platinum
+  rto: 300  # Recovery Time Objective: 5 minutes
+  rpo: 0  # Recovery Point Objective: zero data loss
+  oncall: platform-oncall@company.com

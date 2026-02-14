@@ -1,0 +1,290 @@
+services:
+  # Phase 1 Services
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: netweaver-timescaledb
+    environment:
+      POSTGRES_DB: netweaver
+      POSTGRES_USER: netweaver
+      POSTGRES_PASSWORD: netweaver_secure_pass_2026
+      TIMESCALEDB_TELEMETRY: "off"
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./deployments/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - netweaver
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netweaver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Phase 2 Services
+  
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: netweaver-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: netweaver
+      RABBITMQ_DEFAULT_PASS: netweaver_rabbitmq_2026
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - netweaver
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: netweaver-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - netweaver
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  intent-engine:
+    build:
+      context: ./services/intent-engine
+      dockerfile: Dockerfile
+    container_name: netweaver-intent-engine
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: netweaver
+      DB_USER: netweaver
+      DB_PASSWORD: netweaver_secure_pass_2026
+      PORT: 8081
+      ENV: production
+    ports:
+      - "8081:8081"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  device-manager:
+    build:
+      context: ./services/device-manager
+      dockerfile: Dockerfile
+    container_name: netweaver-device-manager
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: netweaver
+      DB_USER: netweaver
+      DB_PASSWORD: netweaver_secure_pass_2026
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8083:8083"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    volumes:
+      - ./services/device-manager/templates:/app/templates
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  self-healing:
+    build:
+      context: ./services/self-healing
+      dockerfile: Dockerfile
+    container_name: netweaver-self-healing
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: netweaver
+      DB_USER: netweaver
+      DB_PASSWORD: netweaver_secure_pass_2026
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: netweaver
+      RABBITMQ_PASS: netweaver_rabbitmq_2026
+      DEVICE_MANAGER_URL: http://device-manager:8083
+      INTENT_ENGINE_URL: http://intent-engine:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      device-manager:
+        condition: service_started
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  security-agent:
+    build:
+      context: ./services/security-agent
+      dockerfile: Dockerfile
+    container_name: netweaver-security-agent
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: netweaver
+      DB_USER: netweaver
+      DB_PASSWORD: netweaver_secure_pass_2026
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: netweaver
+      RABBITMQ_PASS: netweaver_rabbitmq_2026
+      DEVICE_MANAGER_URL: http://device-manager:8083
+    ports:
+      - "8084:8084"
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      device-manager:
+        condition: service_started
+    networks:
+      - netweaver
+    restart: unless-stopped
+    volumes:
+      - ./python/checkpoints:/app/checkpoints  # ML models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: netweaver-api-gateway
+    environment:
+      INTENT_ENGINE_URL: http://intent-engine:8081
+      DEVICE_MANAGER_URL: http://device-manager:8083
+      SELF_HEALING_URL: http://self-healing:8082
+      SECURITY_AGENT_URL: http://security-agent:8084
+      JWT_SECRET_KEY: "netweaver_jwt_secret_prod_change_this_2026"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      intent-engine:
+        condition: service_started
+      device-manager:
+        condition: service_started
+      self-healing:
+        condition: service_started
+      security-agent:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-ui:
+    build:
+      context: ./services/web-ui
+      dockerfile: Dockerfile
+    container_name: netweaver-web-ui
+    environment:
+      REACT_APP_API_URL: http://localhost:8080
+      REACT_APP_WS_URL: ws://localhost:8080
+    ports:
+      - "3000:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - netweaver
+    restart: unless-stopped
+
+  # Monitoring (Optional)
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: netweaver-prometheus
+    volumes:
+      - ./deployments/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - netweaver
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: netweaver-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deployments/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./deployments/grafana/datasources:/etc/grafana/provisioning/datasources
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+      - timescaledb
+    networks:
+      - netweaver
+    restart: unless-stopped
+
+networks:
+  netweaver:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  timescale_data:
+  rabbitmq_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

@@ -1,0 +1,64 @@
+# Example 1: Low Latency for Video Traffic
+name: video-low-latency
+description: Ensure video conferencing traffic has less than 50ms latency
+priority: 100
+created_by: admin
+
+policy:
+  type: latency
+  constraints:
+    - metric: latency
+      operator: "<"
+      value: 50
+      unit: ms
+    - metric: jitter
+      operator: "<"
+      value: 10
+      unit: ms
+    - metric: packet_loss
+      operator: "<"
+      value: 0.5
+      unit: "%"
+  
+  actions:
+    - type: qos
+      parameters:
+        class: ef  # Expedited Forwarding
+        priority: high
+        bandwidth_percent: 30
+    - type: route
+      parameters:
+        path_selection: lowest-latency
+        backup_path: true
+  
+  conditions:
+    - type: traffic_type
+      parameters:
+        type: video
+        protocols: [udp]
+        ports: [3478, 5004, 8801-8810]  # WebRTC, RTP
+    - type: source
+      parameters:
+        networks: [192.168.100.0/24]  # Video conferencing subnet
+
+targets:
+  - type: device
+    identifiers:
+      - router-edge-01
+      - router-edge-02
+      - router-core-01
+  - type: interface
+    identifiers:
+      - GigabitEthernet0/0/1
+      - TenGigabitEthernet0/0/0
+
+schedule:
+  start_time: "08:00"
+  end_time: "18:00"
+  days: [monday, tuesday, wednesday, thursday, friday]
+  timezone: America/New_York
+
+metadata:
+  owner: network-team
+  environment: production
+  cost_center: engineering

@@ -1,0 +1,40 @@
+# Device Manager Service Requirements
+# Python 3.11+
+
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# Device Connection Libraries
+netmiko==4.3.0        # Multi-vendor SSH (Cisco, Juniper, Arista)
+ncclient==0.6.15      # NETCONF client (Cisco, Juniper)
+junos-eznc==2.7.0     # Juniper PyEZ
+pyeapi==1.0.2         # Arista eAPI
+
+# Templating
+jinja2==3.1.2         # Config template rendering
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.23
+
+# Utilities
+pyyaml==6.0.1
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0  # JWT
+passlib[bcrypt]==1.7.4  # Password hashing
+
+# Logging and Monitoring
+python-json-logger==2.0.7
+prometheus-client==0.19.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+httpx==0.25.2  # For testing FastAPI
+
+# Development
+black==23.12.0
+flake8==6.1.0
+mypy==1.7.1
