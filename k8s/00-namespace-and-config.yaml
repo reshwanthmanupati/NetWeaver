@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: netweaver
+  labels:
+    name: netweaver
+    environment: production
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: netweaver-config
+  namespace: netweaver
+data:
+  # Database configuration
+  DB_HOST: "timescaledb"
+  DB_PORT: "5432"
+  DB_NAME: "netweaver"
+  DB_USER: "netweaver"
+  
+  # RabbitMQ configuration
+  RABBITMQ_HOST: "rabbitmq"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: "netweaver"
+  
+  # Redis configuration
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  
+  # Service URLs
+  INTENT_ENGINE_URL: "http://intent-engine:8081"
+  DEVICE_MANAGER_URL: "http://device-manager:8083"
+  SELF_HEALING_URL: "http://self-healing:8082"
+  SECURITY_AGENT_URL: "http://security-agent:8084"
+  
+  # Environment
+  ENV: "production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: netweaver-secrets
+  namespace: netweaver
+type: Opaque
+stringData:
+  # Database password
+  DB_PASSWORD: "netweaver_secure_pass_2026"
+  
+  # RabbitMQ password
+  RABBITMQ_PASS: "netweaver_rabbitmq_2026"
+  
+  # JWT secret key
+  JWT_SECRET_KEY: "netweaver_jwt_secret_prod_change_this_2026"
+  
+  # TimescaleDB password
+  POSTGRES_PASSWORD: "netweaver_secure_pass_2026"

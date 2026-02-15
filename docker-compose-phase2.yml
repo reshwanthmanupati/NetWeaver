@@ -223,57 +223,57 @@ services:
       timeout: 10s
       retries: 3
 
-  web-ui:
-    build:
-      context: ./services/web-ui
-      dockerfile: Dockerfile
-    container_name: netweaver-web-ui
-    environment:
-      REACT_APP_API_URL: http://localhost:8080
-      REACT_APP_WS_URL: ws://localhost:8080
-    ports:
-      - "3000:80"
-    depends_on:
-      - api-gateway
-    networks:
-      - netweaver
-    restart: unless-stopped
+  # web-ui:
+  #   build:
+  #     context: ./services/web-ui
+  #     dockerfile: Dockerfile
+  #   container_name: netweaver-web-ui
+  #   environment:
+  #     REACT_APP_API_URL: http://localhost:8080
+  #     REACT_APP_WS_URL: ws://localhost:8080
+  #   ports:
+  #     - "3000:80"
+  #   depends_on:
+  #     - api-gateway
+  #   networks:
+  #     - netweaver
+  #   restart: unless-stopped
 
-  # Monitoring (Optional)
+  # # Monitoring (Optional)
   
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: netweaver-prometheus
-    volumes:
-      - ./deployments/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-    ports:
-      - "9090:9090"
-    networks:
-      - netweaver
-    restart: unless-stopped
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: netweaver-prometheus
+  #   volumes:
+  #     - ./deployments/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #   ports:
+  #     - "9090:9090"
+  #   networks:
+  #     - netweaver
+  #   restart: unless-stopped
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: netweaver-grafana
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_INSTALL_PLUGINS: grafana-clock-panel
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./deployments/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./deployments/grafana/datasources:/etc/grafana/provisioning/datasources
-    ports:
-      - "3001:3000"
-    depends_on:
-      - prometheus
-      - timescaledb
-    networks:
-      - netweaver
-    restart: unless-stopped
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: netweaver-grafana
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: admin
+  #     GF_INSTALL_PLUGINS: grafana-clock-panel
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./deployments/grafana/dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./deployments/grafana/datasources:/etc/grafana/provisioning/datasources
+  #   ports:
+  #     - "3001:3000"
+  #   depends_on:
+  #     - prometheus
+  #     - timescaledb
+  #   networks:
+  #     - netweaver
+  #   restart: unless-stopped
 
 networks:
   netweaver:
