@@ -9,6 +9,7 @@ Supports:
 """
 
 import logging
+import uuid
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -145,8 +146,8 @@ async def create_device(device: DeviceCreate):
     """Register a new network device"""
     logger.info(f"Creating device: {device.name}")
     
-    # Generate device ID
-    device_id = f"device-{len(devices_db) + 1}"
+    # Generate unique device ID using UUID
+    device_id = f"device-{uuid.uuid4().hex[:8]}"
     
     # Create device object
     new_device = Device(

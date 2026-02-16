@@ -117,24 +117,23 @@ func setupRouter(intentEngine *engine.IntentEngine, store engine.Storage) *gin.E
 	apiHandler := api.NewHandler(intentEngine, store)
 	v1 := router.Group("/api/v1")
 	{
-		// Intent CRUD operations
+		// Static routes MUST be registered before wildcard :id routes
+		// to prevent Gin httprouter panic from wildcard/static conflicts
 		v1.POST("/intents", apiHandler.CreateIntent)
 		v1.GET("/intents", apiHandler.ListIntents)
+		v1.POST("/intents/validate-policy", apiHandler.ValidatePolicy)
+		v1.GET("/intents/conflicts", apiHandler.DetectConflicts)
+		v1.GET("/intents/compliance-report", apiHandler.GetComplianceReport)
+
+		// Wildcard :id routes (after static routes)
 		v1.GET("/intents/:id", apiHandler.GetIntent)
 		v1.PUT("/intents/:id", apiHandler.UpdateIntent)
 		v1.DELETE("/intents/:id", apiHandler.DeleteIntent)
-
-		// Intent operations
 		v1.POST("/intents/:id/validate", apiHandler.ValidateIntent)
 		v1.POST("/intents/:id/deploy", apiHandler.DeployIntent)
 		v1.POST("/intents/:id/rollback", apiHandler.RollbackIntent)
 		v1.GET("/intents/:id/compliance", apiHandler.CheckCompliance)
 		v1.GET("/intents/:id/history", apiHandler.GetIntentHistory)
-
-		// Policy operations
-		v1.POST("/intents/validate-policy", apiHandler.ValidatePolicy)
-		v1.GET("/intents/conflicts", apiHandler.DetectConflicts)
-		v1.GET("/intents/compliance-report", apiHandler.GetComplianceReport)
 	}
 
 	return router

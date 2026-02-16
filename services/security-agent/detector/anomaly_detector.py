@@ -68,8 +68,9 @@ class AnomalyDetector:
             if not self.is_ready:
                 logger.info("No pre-trained models found, will train on incoming data")
             
-            self.is_ready = True
-            logger.info("Anomaly Detector initialized")
+            # Model is initialized but NOT ready until fitted with data
+            # is_ready stays False until _train_models() succeeds
+            logger.info("Anomaly Detector initialized (awaiting training data)")
         except Exception as e:
             logger.error(f"Failed to initialize anomaly detector: {e}")
             raise
@@ -199,6 +200,8 @@ class AnomalyDetector:
             # Train Isolation Forest
             self.isolation_forest.fit(X_scaled)
             
+            # Mark as ready AFTER successful training
+            self.is_ready = True
             logger.info("✅ Anomaly detector trained successfully")
             
             # Save models for future use

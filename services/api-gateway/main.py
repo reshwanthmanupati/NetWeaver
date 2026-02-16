@@ -4,8 +4,6 @@ Handles authentication, rate limiting, and request routing
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import time
@@ -232,7 +230,10 @@ async def forward_request(
         response = await http_client.request(**request_args)
         response.raise_for_status()
         
-        return response.json()
+        try:
+            return response.json()
+        except Exception:
+            return {"raw_response": response.text}
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error forwarding to {url}: {e}")
         raise HTTPException(status_code=e.response.status_code, detail=str(e))
@@ -393,7 +394,10 @@ async def deploy_intent(
     current_user: User = Depends(get_current_user)
 ):
     """Deploy intent"""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     return await forward_request(
         INTENT_ENGINE_URL,
         f"/api/v1/intents/{intent_id}/deploy",
@@ -492,7 +496,10 @@ async def resolve_incident(
     current_user: User = Depends(get_current_user)
 ):
     """Resolve incident"""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     return await forward_request(
         SELF_HEALING_URL,
         f"/api/v1/incidents/{incident_id}/resolve",
@@ -572,40 +579,45 @@ async def get_dashboard(current_user: User = Depends(get_current_user)):
     """Get aggregated dashboard data from all services"""
     dashboard_data = {}
     
-    # Gather data from all services in parallel
-    try:
-        intent_stats = await forward_request(INTENT_ENGINE_URL, "/api/v1/intents")
-        dashboard_data["intents"] = {
-            "total": intent_stats.get("count", 0),
-            "intents": intent_stats.get("intents", [])[:5]  # Latest 5
-        }
-    except Exception as e:
-        logger.error(f"Failed to get intent stats: {e}")
-        dashboard_data["intents"] = {"error": str(e)}
-    
-    try:
-        device_stats = await forward_request(DEVICE_MANAGER_URL, "/api/v1/devices")
-        dashboard_data["devices"] = {
-            "total": device_stats.get("count", 0),
-            "online": sum(1 for d in device_stats.get("devices", []) if d.get("status") == "online")
-        }
-    except Exception as e:
-        logger.error(f"Failed to get device stats: {e}")
-        dashboard_data["devices"] = {"error": str(e)}
-    
-    try:
-        incident_stats = await forward_request(SELF_HEALING_URL, "/api/v1/stats")
-        dashboard_data["incidents"] = incident_stats
-    except Exception as e:
-        logger.error(f"Failed to get incident stats: {e}")
-        dashboard_data["incidents"] = {"error": str(e)}
-    
-    try:
-        threat_stats = await forward_request(SECURITY_AGENT_URL, "/api/v1/stats")
-        dashboard_data["threats"] = threat_stats
-    except Exception as e:
-        logger.error(f"Failed to get threat stats: {e}")
-        dashboard_data["threats"] = {"error": str(e)}
+    # Gather data from all services in parallel using asyncio.gather
+    async def fetch_intents():
+        try:
+            stats = await forward_request(INTENT_ENGINE_URL, "/api/v1/intents")
+            return {"total": stats.get("count", 0), "intents": stats.get("intents", [])[:5]}
+        except Exception as e:
+            logger.error(f"Failed to get intent stats: {e}")
+            return {"error": str(e)}
+
+    async def fetch_devices():
+        try:
+            stats = await forward_request(DEVICE_MANAGER_URL, "/api/v1/devices")
+            devices = stats if isinstance(stats, list) else stats.get("devices", [])
+            return {"total": len(devices), "online": sum(1 for d in devices if d.get("status") == "online")}
+        except Exception as e:
+            logger.error(f"Failed to get device stats: {e}")
+            return {"error": str(e)}
+
+    async def fetch_incidents():
+        try:
+            return await forward_request(SELF_HEALING_URL, "/api/v1/stats")
+        except Exception as e:
+            logger.error(f"Failed to get incident stats: {e}")
+            return {"error": str(e)}
+
+    async def fetch_threats():
+        try:
+            return await forward_request(SECURITY_AGENT_URL, "/api/v1/stats")
+        except Exception as e:
+            logger.error(f"Failed to get threat stats: {e}")
+            return {"error": str(e)}
+
+    results = await asyncio.gather(
+        fetch_intents(), fetch_devices(), fetch_incidents(), fetch_threats()
+    )
+    dashboard_data["intents"] = results[0]
+    dashboard_data["devices"] = results[1]
+    dashboard_data["incidents"] = results[2]
+    dashboard_data["threats"] = results[3]
     
     return {
         "timestamp": datetime.utcnow().isoformat(),

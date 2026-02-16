@@ -269,8 +269,10 @@ func (s *PostgresStorage) ListIncidents(filters map[string]interface{}) ([]*Inci
 
 	query += " ORDER BY detected_at DESC"
 
-	if limit, ok := filters["limit"].(string); ok && limit != "" {
-		query += fmt.Sprintf(" LIMIT %s", limit)
+	if limitStr, ok := filters["limit"].(string); ok && limitStr != "" {
+		// Parameterize LIMIT to prevent SQL injection
+		query += fmt.Sprintf(" LIMIT $%d", argIndex)
+		args = append(args, limitStr)
 	} else {
 		query += " LIMIT 100"
 	}
@@ -501,15 +503,17 @@ func (s *PostgresStorage) GetStatistics() (map[string]interface{}, error) {
 
 // GetMTTR calculates Mean Time To Resolution for a given period
 func (s *PostgresStorage) GetMTTR(period time.Duration) (time.Duration, error) {
+	// Convert Go duration to seconds for PostgreSQL interval
+	periodSeconds := int(period.Seconds())
 	query := `
 		SELECT AVG(resolution_time_seconds)
 		FROM incidents
 		WHERE resolution_time_seconds IS NOT NULL
-		  AND detected_at > NOW() - $1::interval
+		  AND detected_at > NOW() - make_interval(secs => $1)
 	`
 
 	var avgSeconds sql.NullFloat64
-	err := s.db.QueryRow(query, period.String()).Scan(&avgSeconds)
+	err := s.db.QueryRow(query, periodSeconds).Scan(&avgSeconds)
 	
 	if err != nil {
 		return 0, err

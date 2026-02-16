@@ -3,15 +3,13 @@
   "version": "1.0.0",
   "description": "NetWeaver Web Dashboard",
   "private": true,
+  "type": "module",
   "dependencies": {
     "@emotion/react": "^11.11.1",
     "@emotion/styled": "^11.11.0",
     "@mui/icons-material": "^5.14.18",
     "@mui/material": "^5.14.18",
     "@mui/x-charts": "^6.18.1",
-    "@types/node": "^20.9.0",
-    "@types/react": "^18.2.37",
-    "@types/react-dom": "^18.2.15",
     "axios": "^1.6.2",
     "chart.js": "^4.4.0",
     "cytoscape": "^3.27.0",
@@ -22,39 +20,23 @@
     "react-cytoscapejs": "^2.0.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.19.0",
-    "react-scripts": "5.0.1",
     "recharts": "^2.10.3",
-    "typescript": "^5.2.2",
     "web-vitals": "^3.5.0"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.19.16",
     "@types/js-yaml": "^4.0.9",
-    "ajv": "^6.12.6",
-    "ajv-keywords": "^3.5.2"
+    "@types/node": "^20.9.0",
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "@vitejs/plugin-react": "^4.2.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "proxy": "http://localhost:8080"
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
 }

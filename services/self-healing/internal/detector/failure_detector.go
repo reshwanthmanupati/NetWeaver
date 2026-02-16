@@ -114,61 +114,77 @@ func (fd *FailureDetector) Start(ctx context.Context, rem *remediator.Remediator
 }
 
 func (fd *FailureDetector) consumeTelemetryEvents(ctx context.Context, rem *remediator.Remediator) {
-	msgs, err := fd.channel.Consume(
-		fd.config.TelemetryQueue, // queue
-		"self-healing-consumer",   // consumer
-		false,                     // auto-ack
-		false,                     // exclusive
-		false,                     // no-local
-		false,                     // no-wait
-		nil,                       // args
-	)
-	if err != nil {
-		log.Printf("Failed to start consuming: %v", err)
-		return
-	}
-
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg, ok := <-msgs:
-			if !ok {
-				log.Println("RabbitMQ channel closed, reconnecting...")
-				if err := fd.connectRabbitMQ(); err != nil {
-					log.Printf("Failed to reconnect: %v", err)
-					time.Sleep(5 * time.Second)
-				}
+		msgs, err := fd.channel.Consume(
+			fd.config.TelemetryQueue, // queue
+			"self-healing-consumer",   // consumer
+			false,                     // auto-ack
+			false,                     // exclusive
+			false,                     // no-local
+			false,                     // no-wait
+			nil,                       // args
+		)
+		if err != nil {
+			log.Printf("Failed to start consuming: %v", err)
+			select {
+			case <-ctx.Done():
 				return
-			}
-
-			// Process event
-			var event TelemetryEvent
-			if err := json.Unmarshal(msg.Body, &event); err != nil {
-				log.Printf("Failed to parse telemetry event: %v", err)
-				msg.Nack(false, false)
+			case <-time.After(5 * time.Second):
 				continue
 			}
+		}
 
-			// Analyze event for failures
-			if incident := fd.analyzeEvent(&event); incident != nil {
-				log.Printf("⚠️  Failure detected: %s on device %s", incident.Type, incident.DeviceID)
-				
-				// Save incident
-				if err := fd.storage.SaveIncident(incident); err != nil {
-					log.Printf("Failed to save incident: %v", err)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-msgs:
+				if !ok {
+					log.Println("RabbitMQ channel closed, reconnecting...")
+					for retries := 0; retries < 10; retries++ {
+						if err := fd.connectRabbitMQ(); err != nil {
+							log.Printf("Reconnect attempt %d failed: %v", retries+1, err)
+							select {
+							case <-ctx.Done():
+								return
+							case <-time.After(5 * time.Second):
+							}
+						} else {
+							log.Println("RabbitMQ reconnected successfully")
+							break
+						}
+					}
+					break // Break inner loop to re-register consumer
 				}
 
-				// Trigger remediation
-				go func() {
-					remCtx := context.Background()
-					if err := rem.Remediate(remCtx, incident); err != nil {
-						log.Printf("Remediation failed: %v", err)
-					}
-				}()
-			}
+				// Process event
+				var event TelemetryEvent
+				if err := json.Unmarshal(msg.Body, &event); err != nil {
+					log.Printf("Failed to parse telemetry event: %v", err)
+					msg.Nack(false, false)
+					continue
+				}
 
-			msg.Ack(false)
+				// Analyze event for failures
+				if incident := fd.analyzeEvent(&event); incident != nil {
+					log.Printf("⚠️  Failure detected: %s on device %s", incident.Type, incident.DeviceID)
+					
+					// Save incident
+					if err := fd.storage.SaveIncident(incident); err != nil {
+						log.Printf("Failed to save incident: %v", err)
+					}
+
+					// Trigger remediation
+					go func() {
+						remCtx := context.Background()
+						if err := rem.Remediate(remCtx, incident); err != nil {
+							log.Printf("Remediation failed: %v", err)
+						}
+					}()
+				}
+
+				msg.Ack(false)
+			}
 		}
 	}
 }
@@ -365,7 +381,8 @@ func (fd *FailureDetector) checkDeviceHealth(ctx context.Context, rem *remediato
 func (fd *FailureDetector) isDeviceReachable(deviceID string) bool {
 	url := fmt.Sprintf("%s/api/v1/devices/%s/health", fd.config.DeviceManagerURL, deviceID)
 	
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
 	if err != nil {
 		return false
 	}

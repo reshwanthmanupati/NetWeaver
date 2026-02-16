@@ -286,7 +286,8 @@ class PostgresStorage:
         query += " ORDER BY detected_at DESC"
         
         if filters.get('limit'):
-            query += f" LIMIT {filters['limit']}"
+            query += " LIMIT %s"
+            params.append(int(filters['limit']))
         
         try:
             with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -499,7 +500,7 @@ class PostgresStorage:
                 SUM(packets) as total_packets,
                 SUM(bytes) as total_bytes
             FROM attacks
-            WHERE timestamp > NOW() - INTERVAL '%s hours'
+            WHERE timestamp > NOW() - make_interval(hours => %s)
             GROUP BY attack_type
             ORDER BY count DESC
         """
