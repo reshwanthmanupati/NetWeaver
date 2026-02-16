@@ -500,9 +500,9 @@ For compliance requirements (HIPAA, SOC 2, ISO 27001):
 ## Contact
 
 For security issues or questions:
-- **Email**: security@yourcompany.com
-- **Bug Bounty**: security-bounty@yourcompany.com
-- **Emergency**: +1-XXX-XXX-XXXX
+- **Email**: reshwanth83@gmail.com
+- **Bug Bounty**: reshwanth83@gmail.com
+- **Emergency**: +91 9392250933
 
 ---
 
