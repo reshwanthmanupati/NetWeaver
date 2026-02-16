@@ -29,7 +29,9 @@
   },
   "devDependencies": {
     "@types/cytoscape": "^3.19.16",
-    "@types/js-yaml": "^4.0.9"
+    "@types/js-yaml": "^4.0.9",
+    "ajv": "^6.12.6",
+    "ajv-keywords": "^3.5.2"
   },
   "scripts": {
     "start": "react-scripts start",
