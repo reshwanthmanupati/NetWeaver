@@ -33,46 +33,46 @@ NetWeaver is a production-grade autonomous network infrastructure platform that 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                         NetWeaver Platform v2.0                         │
+│                         NetWeaver Platform v2.0                          │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│   ┌─────────────┐   ┌──────────────┐   ┌──────────────┐                │
-│   │   Web UI     │   │  API Gateway │   │  WebSocket   │                │
-│   │  (React 18)  │──>│  (FastAPI)   │──>│  Real-time   │                │
-│   │  Port 3000   │   │  Port 8080   │   │  Updates     │                │
-│   └─────────────┘   └──────┬───────┘   └──────────────┘                │
-│                             │                                            │
-│              ┌──────────────┼──────────────┬──────────────┐              │
-│              v              v              v              v              │
-│   ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐  │
-│   │Intent Engine │ │Device Manager│ │ Self-Healing  │ │Security Agent│  │
-│   │   (Go/Gin)   │ │  (FastAPI)   │ │   (Go/Gin)   │ │  (FastAPI)   │  │
-│   │  Port 8081   │ │  Port 8083   │ │  Port 8082   │ │  Port 8084   │  │
-│   │              │ │              │ │              │ │              │  │
-│   │- NLP Parser  │ │- Cisco IOS   │ │- Failure Det.│ │- DDoS Detect │  │
-│   │- Translator  │ │- Juniper     │ │- Remediator  │ │- ML Anomaly  │  │
-│   │- Compliance  │ │- Arista EOS  │ │- Auto-Heal   │ │- Mitigator   │  │
-│   └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘  │
-│          │                │                │                │          │
-│   ┌──────┴────────────────┴────────────────┴────────────────┴───────┐  │
-│   │                    Infrastructure Layer                         │  │
-│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │  │
-│   │  │ TimescaleDB   │  │  RabbitMQ    │  │    Redis     │          │  │
-│   │  │  Port 5432    │  │  Port 5672   │  │  Port 6379   │          │  │
-│   │  │  12 tables    │  │  Event bus   │  │  Rate limit  │          │  │
-│   │  │  7 hypertables│  │  Telemetry Q │  │  Caching     │          │  │
-│   │  └──────────────┘  └──────────────┘  └──────────────┘          │  │
-│   └─────────────────────────────────────────────────────────────────┘  │
+│   ┌─────────────┐   ┌──────────────┐   ┌──────────────┐                  │
+│   │   Web UI    │   │  API Gateway │   │  WebSocket   │                  │
+│   │  (React 18) │──>│  (FastAPI)   │──>│  Real-time   │                  │
+│   │  Port 3000  │   │  Port 8080   │   │  Updates     │                  │
+│   └─────────────┘   └──────┬───────┘   └──────────────┘                  │
+│                            │                                             │
+│              ┌─────────────┼──────────────┬──────────────┐               │
+│              v             v              v              v               │
+│   ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐    │
+│   │Intent Engine │ │Device Manager│ │ Self-Healing │ │Security Agent│    │
+│   │   (Go/Gin)   │ │  (FastAPI)   │ │   (Go/Gin)   │ │  (FastAPI)   │    │
+│   │  Port 8081   │ │  Port 8083   │ │  Port 8082   │ │  Port 8084   │    │
+│   │              │ │              │ │              │ │              │    │
+│   │- NLP Parser  │ │- Cisco IOS   │ │- Failure Det.│ │- DDoS Detect │    │
+│   │- Translator  │ │- Juniper     │ │- Remediator  │ │- ML Anomaly  │    │
+│   │- Compliance  │ │- Arista EOS  │ │- Auto-Heal   │ │- Mitigator   │    │
+│   └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘    │
+│          │                │                │                │            │
+│   ┌──────┴────────────────┴────────────────┴────────────────┴───────┐    │
+│   │                    Infrastructure Layer                         │    │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │    │
+│   │  │ TimescaleDB  │  │  RabbitMQ    │  │    Redis     │           │    │
+│   │  │  Port 5432   │  │  Port 5672   │  │  Port 6379   │           │    │
+│   │  │  12 tables   │  │  Event bus   │  │  Rate limit  │           │    │
+│   │  │ 7 hypertables│  │  Telemetry Q │  │  Caching     │           │    │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘           │    │
+│   └─────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
-│   ┌─────────────────────────────────────────────────────────────────┐  │
-│   │                    Phase 1 Foundation                           │  │
-│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │  │
-│   │  │Telemetry Agent│  │ ML Predictor │  │  Optimizer   │          │  │
-│   │  │  (Go)         │  │  (Python)    │  │  (Go)        │          │  │
-│   │  │  NetFlow/sFlow│  │  LSTM/Transf.│  │  Dijkstra    │          │  │
-│   │  │  LLDP/CDP     │  │  Forecasting │  │  K-paths     │          │  │
-│   │  └──────────────┘  └──────────────┘  └──────────────┘          │  │
-│   └─────────────────────────────────────────────────────────────────┘  │
+│   ┌─────────────────────────────────────────────────────────────────┐    │
+│   │                    Phase 1 Foundation                           │    │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │    │
+│   │  │Telemetry Agent│ │ ML Predictor │  │  Optimizer   │           │    │
+│   │  │  (Go)         │ │  (Python)    │  │  (Go)        │           │    │
+│   │  │  NetFlow/sFlow│ │  LSTM/Transf.│  │  Dijkstra    │           │    │
+│   │  │  LLDP/CDP     │ │  Forecasting │  │  K-paths     │           │    │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘           │    │
+│   └─────────────────────────────────────────────────────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
