@@ -33,11 +33,11 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "netweaver_secret_key_change_in_product
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Service URLs
-INTENT_ENGINE_URL = os.getenv("INTENT_ENGINE_URL", "http://intent-engine:8081")
-DEVICE_MANAGER_URL = os.getenv("DEVICE_MANAGER_URL", "http://device-manager:8083")
-SELF_HEALING_URL = os.getenv("SELF_HEALING_URL", "http://self-healing:8082")
-SECURITY_AGENT_URL = os.getenv("SECURITY_AGENT_URL", "http://security-agent:8084")
+# Service URLs (defaults to localhost for local dev; Docker Compose sets env vars)
+INTENT_ENGINE_URL = os.getenv("INTENT_ENGINE_URL", "http://localhost:8081")
+DEVICE_MANAGER_URL = os.getenv("DEVICE_MANAGER_URL", "http://localhost:8083")
+SELF_HEALING_URL = os.getenv("SELF_HEALING_URL", "http://localhost:8082")
+SECURITY_AGENT_URL = os.getenv("SECURITY_AGENT_URL", "http://localhost:8084")
 
 # Redis for rate limiting
 redis_client = None
@@ -236,7 +236,12 @@ async def forward_request(
             return {"raw_response": response.text}
     except httpx.HTTPStatusError as e:
         logger.error(f"HTTP error forwarding to {url}: {e}")
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+        # Try to forward the backend's error body for better diagnostics
+        try:
+            detail = e.response.json()
+        except Exception:
+            detail = e.response.text or str(e)
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
     except httpx.RequestError as e:
         logger.error(f"Request error forwarding to {url}: {e}")
         raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
