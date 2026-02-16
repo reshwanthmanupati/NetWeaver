@@ -3,7 +3,7 @@
 <p align="center">
   <strong>Version</strong>: 2.0.0 &nbsp;|&nbsp;
   <strong>Status</strong>: Phase 2 Complete &nbsp;|&nbsp;
-  <strong>License</strong>: MIT
+  <strong>License</strong>: Apache 2.0
 </p>
 
 ---
