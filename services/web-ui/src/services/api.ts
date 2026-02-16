@@ -13,6 +13,19 @@ interface AuthResponse {
   expires_in: number;
 }
 
+// ── CSRF Token Utility ─────────────────────────────────────────────────────
+function getCsrfTokenFromCookie(): string | null {
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === 'csrf_token') {
+      return value;
+    }
+  }
+  return null;
+}
+
+// ── API Service ────────────────────────────────────────────────────────────
 class ApiService {
   private client: AxiosInstance;
   private token: string | null = null;
@@ -21,13 +34,31 @@ class ApiService {
     this.client = axios.create({
       baseURL: API_BASE_URL,
       timeout: 30000,
+      withCredentials: true, // Enable cookies for CSRF protection
     });
 
-    // Load token from localStorage
+    // Security Note: localStorage for tokens is vulnerable to XSS attacks.
+    // In production, prefer httpOnly cookies for token storage.
+    // Current implementation maintains backward compatibility.
     this.token = localStorage.getItem('access_token');
     if (this.token) {
       this.setAuthHeader(this.token);
     }
+
+    // Request interceptor - add CSRF token to all state-changing requests
+    this.client.interceptors.request.use(
+      (config) => {
+        // Add CSRF token for POST, PUT, DELETE, PATCH requests
+        if (config.method && ['post', 'put', 'delete', 'patch'].includes(config.method.toLowerCase())) {
+          const csrfToken = getCsrfTokenFromCookie();
+          if (csrfToken) {
+            config.headers['X-CSRF-Token'] = csrfToken;
+          }
+        }
+        return config;
+      },
+      (error) => Promise.reject(error)
+    );
 
     // Response interceptor for token refresh
     this.client.interceptors.response.use(

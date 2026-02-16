@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import time
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
@@ -17,7 +18,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
 import redis.asyncio as redis
 
@@ -28,10 +30,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "netweaver_secret_key_change_in_production")
+# Configuration with validation
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    logger.warning("⚠️  JWT_SECRET_KEY not set in environment. Using generated key (NOT FOR PRODUCTION!)")
+    SECRET_KEY = secrets.token_urlsafe(32)
+elif SECRET_KEY == "netweaver_secret_key_change_in_production":
+    logger.error("🚨 SECURITY WARNING: Default JWT secret key detected! Set JWT_SECRET_KEY environment variable!")
+
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+CSRF_PROTECTION_ENABLED = os.getenv("CSRF_PROTECTION", "true").lower() == "true"
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")  # development, staging, production
 
 # Service URLs (defaults to localhost for local dev; Docker Compose sets env vars)
 INTENT_ENGINE_URL = os.getenv("INTENT_ENGINE_URL", "http://localhost:8081")
@@ -39,12 +49,85 @@ DEVICE_MANAGER_URL = os.getenv("DEVICE_MANAGER_URL", "http://localhost:8083")
 SELF_HEALING_URL = os.getenv("SELF_HEALING_URL", "http://localhost:8082")
 SECURITY_AGENT_URL = os.getenv("SECURITY_AGENT_URL", "http://localhost:8084")
 
+# CORS Configuration - restrict origins in production
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8080").split(",")
+if ENVIRONMENT == "production" and "*" in ALLOWED_ORIGINS:
+    logger.error("🚨 SECURITY WARNING: Wildcard CORS origin (*) detected in production!")
+
 # Redis for rate limiting
 redis_client = None
 http_client = None
 
 # WebSocket connections
 websocket_connections: Dict[str, WebSocket] = {}
+
+
+# ─── Security Middleware ───────────────────────────────────────────────────
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Add security headers to all responses"""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        # Strict-Transport-Security (HSTS) for production HTTPS
+        if ENVIRONMENT == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
+        # Content Security Policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "  # Adjust based on your needs
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:*"
+        )
+        
+        # Remove server header to not leak implementation details
+        if "server" in response.headers:
+            del response.headers["server"]
+        
+        return response
+
+
+class CSRFProtectionMiddleware(BaseHTTPMiddleware):
+    """CSRF Protection for state-changing operations"""
+    async def dispatch(self, request: Request, call_next):
+        if not CSRF_PROTECTION_ENABLED:
+            return await call_next(request)
+        
+        # Skip CSRF for safe methods and specific paths
+        if request.method in ["GET", "HEAD", "OPTIONS"] or request.url.path in ["/health", "/docs", "/redoc", "/openapi.json"]:
+            response = await call_next(request)
+            # Set CSRF token cookie for subsequent requests
+            if request.method == "GET" and "/api/" in request.url.path:
+                csrf_token = secrets.token_urlsafe(32)
+                response.set_cookie(
+                    key="csrf_token",
+                    value=csrf_token,
+                    httponly=True,
+                    secure=ENVIRONMENT == "production",
+                    samesite="strict"
+                )
+            return response
+        
+        # Verify CSRF token for state-changing requests
+        csrf_cookie = request.cookies.get("csrf_token")
+        csrf_header = request.headers.get("X-CSRF-Token")
+        
+        if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "CSRF token missing or invalid"}
+            )
+        
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -98,23 +181,37 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# CORS middleware
+# Add security middlewares (order matters!)
+app.add_middleware(SecurityHeadersMiddleware)
+if CSRF_PROTECTION_ENABLED:
+    app.add_middleware(CSRFProtectionMiddleware)
+
+# CORS middleware - restrictive by default
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=ALLOWED_ORIGINS,  # Specific origins only
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-CSRF-Token"],  # Expose CSRF token header
+    max_age=3600,  # Cache preflight requests for 1 hour
 )
 
 # Security
 security = HTTPBearer()
 
 
-# Models
+# Models with validation
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50, regex=r'^[a-zA-Z0-9_-]+$')
+    password: str = Field(..., min_length=8, max_length=128)
+    
+    @validator('username')
+    def validate_username(cls, v):
+        """Sanitize username to prevent injection attacks"""
+        if not v or not v.strip():
+            raise ValueError('Username cannot be empty')
+        return v.strip()
 
 
 class Token(BaseModel):
@@ -127,6 +224,30 @@ class User(BaseModel):
     username: str
     email: Optional[str] = None
     roles: List[str] = Field(default_factory=list)
+
+
+# ─── Custom Exception Handler ─────────────────────────────────────────────
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle unexpected errors without leaking sensitive information"""
+    logger.error(f"Unhandled exception: {type(exc).__name__}: {str(exc)}", exc_info=True)
+    
+    # Don't expose internal errors in production
+    if ENVIRONMENT == "production":
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "An internal error occurred"}
+        )
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "An error occurred",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc)
+            }
+        )
 
 
 # Authentication
@@ -201,7 +322,12 @@ async def check_rate_limit(request: Request, limit: int = 100, window: int = 60)
 async def require_rate_limit(request: Request):
     """Dependency to enforce rate limiting"""
     if not await check_rate_limit(request, limit=100, window=60):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+        logger.warning(f"Rate limit exceeded for IP: {request.client.host}")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": "60"}
+        )
 
 
 # Request Forwarding
@@ -211,17 +337,31 @@ async def forward_request(
     method: str = "GET",
     headers: Optional[Dict] = None,
     json_data: Optional[Dict] = None,
-    query_params: Optional[Dict] = None
+    query_params: Optional[Dict] = None,
+    timeout: float = 30.0
 ) -> Dict[str, Any]:
-    """Forward request to backend service"""
+    """
+    Forward request to backend service with security considerations
+    - Timeout protection
+    - Error sanitization
+    - Request validation
+    """
     url = f"{service_url}{path}"
+    
+    # Validate that we're not being redirected externally
+    if not service_url.startswith(("http://intent-engine", "http://device-manager", 
+                                    "http://self-healing", "http://security-agent",
+                                    "http://localhost")):
+        logger.error(f"Attempted request to unauthorized service: {service_url}")
+        raise HTTPException(status_code=403, detail="Unauthorized service URL")
     
     try:
         request_args = {
             "method": method,
             "url": url,
             "headers": headers or {},
-            "params": query_params
+            "params": query_params,
+            "timeout": timeout
         }
         
         if json_data is not None:
@@ -234,20 +374,40 @@ async def forward_request(
             return response.json()
         except Exception:
             return {"raw_response": response.text}
+            
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error forwarding to {url}: {e}")
-        # Try to forward the backend's error body for better diagnostics
+        logger.error(f"HTTP error forwarding to {service_url}: {e.response.status_code}")
+        # Forward backend errors but sanitize sensitive details
         try:
             detail = e.response.json()
+            # Remove any keys that might leak internal info
+            if isinstance(detail, dict):
+                detail.pop("traceback", None)
+                detail.pop("stack_trace", None)
         except Exception:
-            detail = e.response.text or str(e)
+            detail = {"message": "Backend service error"}
         raise HTTPException(status_code=e.response.status_code, detail=detail)
+        
+    except httpx.TimeoutException:
+        logger.error(f"Timeout forwarding to {service_url}")
+        raise HTTPException(
+            status_code=504,
+            detail="Gateway timeout - backend service did not respond in time"
+        )
+        
     except httpx.RequestError as e:
-        logger.error(f"Request error forwarding to {url}: {e}")
-        raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
+        logger.error(f"Request error forwarding to {service_url}: {type(e).__name__}")
+        raise HTTPException(
+            status_code=503,
+            detail="Backend service temporarily unavailable"
+        )
+        
     except Exception as e:
-        logger.error(f"Error forwarding request: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Unexpected error forwarding request: {type(e).__name__}", exc_info=True)
+        if ENVIRONMENT == "production":
+            raise HTTPException(status_code=500, detail="Internal gateway error")
+        else:
+            raise HTTPException(status_code=500, detail=f"Gateway error: {str(e)}")
 
 
 # Health Check
@@ -281,24 +441,48 @@ async def health_check():
 
 # Authentication Endpoints
 @app.post("/api/v1/auth/login", response_model=Token)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, req: Request):
     """
     Authenticate user and return JWT token
     
-    In production, validate against user database
+    Security considerations:
+    - Rate limited to prevent brute force
+    - Username/password validation
+    - Secure token generation
+    
+    TODO: In production, validate against user database with bcrypt password hashing
     """
-    # Demo: Accept any username/password for testing
-    # In production: Validate against database with bcrypt
+    # Additional rate limiting for login endpoint (stricter)
+    if not await check_rate_limit(req, limit=5, window=300):  # 5 attempts per 5 minutes
+        logger.warning(f"Login rate limit exceeded for IP: {req.client.host}, username: {request.username}")
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again in 5 minutes.",
+            headers={"Retry-After": "300"}
+        )
+    
+    # Demo mode: Accept any username/password for testing
+    # In production, this should:
+    # 1. Query user database
+    # 2. Verify password with bcrypt.checkpw()
+    # 3. Check if account is active/not locked
+    # 4. Log authentication attempt
+    
     if not request.username or not request.password:
+        logger.warning(f"Login attempt with empty credentials from IP: {req.client.host}")
         raise HTTPException(status_code=400, detail="Username and password required")
     
-    # Create token
+    # Simulate successful authentication
+    logger.info(f"User {request.username} authenticated from {req.client.host}")
+    
+    # Create token with limited lifetime
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={
             "sub": request.username,
             "email": f"{request.username}@netweaver.local",
-            "roles": ["admin", "user"]
+            "roles": ["admin", "user"],
+            "iat": datetime.utcnow(),  # Issued at
         },
         expires_delta=access_token_expires
     )
