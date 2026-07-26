@@ -1,0 +1,310 @@
+# ============================================================================
+# NetWeaver Production Docker Compose
+# ============================================================================
+# Includes: Nginx reverse proxy, Let's Encrypt TLS, all microservices
+#
+# Usage:
+#   1. Copy .env.production → .env and set all values
+#   2. Run: docker-compose -f docker-compose-production.yml up -d
+#   3. Obtain certs: docker-compose -f docker-compose-production.yml run certbot
+#   4. Reload nginx: docker-compose -f docker-compose-production.yml exec nginx nginx -s reload
+# ============================================================================
+
+services:
+  # ── Reverse Proxy & TLS Termination ─────────────────────────────────────
+  nginx:
+    build:
+      context: ./deployments/nginx
+      dockerfile: Dockerfile
+    container_name: netweaver-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deployments/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Let's Encrypt Certificate Manager ───────────────────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: netweaver-certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Run: docker-compose -f docker-compose-production.yml run certbot certonly --webroot -w /var/www/certbot -d $DOMAIN --email $CERTBOT_EMAIL --agree-tos --no-eff-email
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done'"
+    networks:
+      - netweaver
+
+  # ── Infrastructure ──────────────────────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: netweaver-timescaledb
+    environment:
+      POSTGRES_DB: ${DB_NAME:-netweaver}
+      POSTGRES_USER: ${DB_USER:-netweaver}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./deployments/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-netweaver}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Production: Don't expose DB port externally
+    # ports:
+    #   - "5432:5432"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: netweaver-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-netweaver}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Production: Don't expose RabbitMQ management externally
+    # ports:
+    #   - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    container_name: netweaver-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - netweaver
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${DB_PASSWORD}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Backend Services ────────────────────────────────────────────────────
+  intent-engine:
+    build:
+      context: ./services/intent-engine
+      dockerfile: Dockerfile
+    container_name: netweaver-intent-engine
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-netweaver}
+      DB_USER: ${DB_USER:-netweaver}
+      DB_PASSWORD: ${DB_PASSWORD}
+      PORT: 8081
+      ENV: production
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  device-manager:
+    build:
+      context: ./services/device-manager
+      dockerfile: Dockerfile
+    container_name: netweaver-device-manager
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-netweaver}
+      DB_USER: ${DB_USER:-netweaver}
+      DB_PASSWORD: ${DB_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    volumes:
+      - ./services/device-manager/templates:/app/templates:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  self-healing:
+    build:
+      context: ./services/self-healing
+      dockerfile: Dockerfile
+    container_name: netweaver-self-healing
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-netweaver}
+      DB_USER: ${DB_USER:-netweaver}
+      DB_PASSWORD: ${DB_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-netweaver}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
+      DEVICE_MANAGER_URL: http://device-manager:8083
+      INTENT_ENGINE_URL: http://intent-engine:8081
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      device-manager:
+        condition: service_started
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  security-agent:
+    build:
+      context: ./services/security-agent
+      dockerfile: Dockerfile
+    container_name: netweaver-security-agent
+    environment:
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-netweaver}
+      DB_USER: ${DB_USER:-netweaver}
+      DB_PASSWORD: ${DB_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-netweaver}
+      RABBITMQ_PASS: ${RABBITMQ_PASS}
+      DEVICE_MANAGER_URL: http://device-manager:8083
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      device-manager:
+        condition: service_started
+    networks:
+      - netweaver
+    restart: unless-stopped
+    volumes:
+      - ./python/checkpoints:/app/checkpoints:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: netweaver-api-gateway
+    environment:
+      INTENT_ENGINE_URL: http://intent-engine:8081
+      DEVICE_MANAGER_URL: http://device-manager:8083
+      SELF_HEALING_URL: http://self-healing:8082
+      SECURITY_AGENT_URL: http://security-agent:8084
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-netweaver}
+      DB_USER: ${DB_USER:-netweaver}
+      DB_PASSWORD: ${DB_PASSWORD}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      CSRF_PROTECTION: ${CSRF_PROTECTION:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://netweaver.example.com}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      MAX_FAILED_ATTEMPTS: ${MAX_FAILED_ATTEMPTS:-5}
+      LOCKOUT_DURATION_MINUTES: ${LOCKOUT_DURATION_MINUTES:-30}
+      PORT: 8080
+    depends_on:
+      intent-engine:
+        condition: service_started
+      device-manager:
+        condition: service_started
+      self-healing:
+        condition: service_started
+      security-agent:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - netweaver
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web-ui:
+    build:
+      context: ./services/web-ui
+      dockerfile: Dockerfile
+    container_name: netweaver-web-ui
+    environment:
+      REACT_APP_API_URL: https://${DOMAIN:-netweaver.example.com}
+      REACT_APP_WS_URL: wss://${DOMAIN:-netweaver.example.com}
+    depends_on:
+      - api-gateway
+    networks:
+      - netweaver
+    restart: unless-stopped
+
+networks:
+  netweaver:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  timescale_data:
+  rabbitmq_data:
+  redis_data:
+  certbot_certs:
+  certbot_www:

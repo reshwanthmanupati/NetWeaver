@@ -200,6 +200,14 @@ services:
       JWT_SECRET_KEY: "netweaver_jwt_secret_prod_change_this_2026"
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      DB_HOST: timescaledb
+      DB_PORT: 5432
+      DB_NAME: netweaver
+      DB_USER: netweaver
+      DB_PASSWORD: netweaver_secure_pass_2026
+      ENVIRONMENT: development
+      MAX_FAILED_ATTEMPTS: 5
+      LOCKOUT_DURATION_MINUTES: 30
       PORT: 8080
     ports:
       - "8080:8080"
@@ -213,6 +221,8 @@ services:
       security-agent:
         condition: service_started
       redis:
+        condition: service_healthy
+      timescaledb:
         condition: service_healthy
     networks:
       - netweaver

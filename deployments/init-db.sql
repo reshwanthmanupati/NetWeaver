@@ -475,6 +475,76 @@ LEFT JOIN LATERAL (
 ) im ON true
 WHERE i.admin_status = 'up';
 
+-- ============================================================================
+-- USER MANAGEMENT TABLES
+-- ============================================================================
+
+-- Users table with bcrypt password hashing
+CREATE TABLE IF NOT EXISTS users (
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(255) UNIQUE,
+    password_hash VARCHAR(255) NOT NULL, -- bcrypt hashed
+    full_name VARCHAR(100),
+    roles TEXT[] NOT NULL DEFAULT '{user}',
+    is_active BOOLEAN DEFAULT true,
+    is_locked BOOLEAN DEFAULT false,
+    failed_login_attempts INTEGER DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    last_login TIMESTAMPTZ,
+    password_changed_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by UUID,
+    metadata JSONB DEFAULT '{}'
+);
+
+CREATE UNIQUE INDEX idx_users_username ON users(username);
+CREATE UNIQUE INDEX idx_users_email ON users(email) WHERE email IS NOT NULL;
+CREATE INDEX idx_users_active ON users(is_active);
+
+-- Audit log for security events
+CREATE TABLE IF NOT EXISTS security_audit_log (
+    log_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    event_type VARCHAR(50) NOT NULL, -- login_success, login_failure, logout, password_change, account_locked, user_created, user_deleted, rate_limit_exceeded
+    severity VARCHAR(20) NOT NULL DEFAULT 'info', -- info, warning, critical
+    username VARCHAR(50),
+    source_ip INET,
+    user_agent TEXT,
+    details JSONB DEFAULT '{}',
+    resolved BOOLEAN DEFAULT false,
+    resolved_at TIMESTAMPTZ,
+    resolved_by VARCHAR(50)
+);
+
+CREATE INDEX idx_audit_time ON security_audit_log(event_time DESC);
+CREATE INDEX idx_audit_type ON security_audit_log(event_type, event_time DESC);
+CREATE INDEX idx_audit_username ON security_audit_log(username, event_time DESC);
+CREATE INDEX idx_audit_severity ON security_audit_log(severity, event_time DESC);
+CREATE INDEX idx_audit_ip ON security_audit_log(source_ip, event_time DESC);
+
+-- Insert default admin user (password: NetWeaver@Admin2026!)
+-- bcrypt hash generated with rounds=12
+INSERT INTO users (username, email, password_hash, full_name, roles)
+VALUES (
+    'admin',
+    'admin@netweaver.local',
+    '$2b$12$qbLzWUP/AdjMp5DGF1tpTezJN.VsvYVNa9Me0MKqkMN6UDUCcoKju',
+    'System Administrator',
+    '{admin,user}'
+) ON CONFLICT (username) DO NOTHING;
+
+-- Insert default readonly user (password: NetWeaver@Read2026!)
+INSERT INTO users (username, email, password_hash, full_name, roles)
+VALUES (
+    'viewer',
+    'viewer@netweaver.local',
+    '$2b$12$F3p6a3YL4fq0.V6YsRJyVud0OxFh/wI2vzTM/xX7dHlU82ANDeKSK',
+    'Read Only User',
+    '{viewer}'
+) ON CONFLICT (username) DO NOTHING;
+
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO netweaver;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO netweaver;
